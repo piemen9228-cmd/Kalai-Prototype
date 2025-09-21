@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kalai - AI-Powered Artisan Marketplace</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#1c1917',
+                        secondary: '#facc15',
+                        accent: '#475569',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #f1f5f9;
+            color: #1c1917;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .container {
+            max-width: 1024px;
+        }
+
+        .card {
+            background-color: #fff;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            border-radius: 1rem;
+        }
+
+        .btn-primary {
+            background-color: #475569;
+            color: #ffffff;
+            font-weight: 600;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            transition: background-color 0.3s;
+        }
+
+        .btn-primary:hover {
+            background-color: #1c1917;
+        }
+
+        .badge {
+            background-color: #facc15;
+            color: #1c1917;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        #output-card {
+            display: none;
+        }
+
+        #loading-indicator {
+            display: none;
+        }
+        
+        .loading-dot {
+            animation: bounce 0.6s infinite alternate;
+        }
+
+        .loading-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .loading-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes bounce {
+            from {
+                transform: translateY(0);
+            }
+            to {
+                transform: translateY(-5px);
+            }
+        }
+
+        #message-box {
+            display: none;
+            position: fixed;
+            top: 2rem;
+            right: 2rem;
+            max-width: 300px;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            color: white;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transition: opacity 0.5s ease-in-out;
+        }
+
+        .success {
+            background-color: #16a34a;
+        }
+
+        .error {
+            background-color: #dc2626;
+        }
+        #image-preview {
+            width: 100%;
+            height: 200px;
+            border-radius: 0.5rem;
+            background-color: #e2e8f0;
+            background-position: center;
+            background-size: cover;
+            border: 2px dashed #94a3b8;
+            cursor: pointer;
+        }
+    </style>
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Enable Firestore debug logging
+        setLogLevel('debug');
+
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth, userId;
+
+        async function initFirebase() {
+            console.log("Initializing Firebase...");
+            console.log("App ID:", appId);
+            console.log("Firebase Config:", firebaseConfig);
+            console.log("Initial Auth Token present:", !!initialAuthToken);
+
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        document.getElementById('user-id').textContent = userId;
+                        console.log("Firebase authenticated. User ID:", userId);
+                        fetchArtisanProducts();
+                    } else {
+                        console.log("No user signed in. Attempting to sign in anonymously...");
+                        if (initialAuthToken) {
+                            try {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                                console.log("Signed in with custom token.");
+                            } catch (error) {
+                                console.error("Error signing in with custom token:", error);
+                                await signInAnonymously(auth);
+                                console.log("Signed in anonymously after custom token failure.");
+                            }
+                        } else {
+                            await signInAnonymously(auth);
+                            console.log("Signed in anonymously.");
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+            }
+        }
+
+        // Firestore function to fetch and display artisan's products
+        function fetchArtisanProducts() {
+            if (!userId) {
+                console.error("User ID not available for fetching products.");
+                return;
+            }
+
+            const productsRef = collection(db, `artifacts/${appId}/users/${userId}/products`);
+            const q = query(productsRef);
+
+            onSnapshot(q, (querySnapshot) => {
+                const productsList = document.getElementById('artisan-products-list');
+                productsList.innerHTML = ''; // Clear previous list
+                querySnapshot.forEach((doc) => {
+                    const product = doc.data();
+                    const productItem = document.createElement('div');
+                    productItem.className = 'bg-white p-4 rounded-lg shadow-sm flex items-center gap-4';
+                    productItem.innerHTML = `
+                        <img src="${product.imageUrl}" alt="${product.title}" class="w-16 h-16 object-cover rounded-lg">
+                        <div>
+                            <h4 class="text-lg font-semibold">${product.title}</h4>
+                            <p class="text-sm text-gray-500">${product.story.substring(0, 50)}...</p>
+                        </div>
+                    `;
+                    productsList.appendChild(productItem);
+                });
+            });
+        }
+
+        initFirebase();
+        
+        window.saveProductToFirestore = async (productData) => {
+            if (!userId) {
+                console.error("User ID not available for saving product.");
+                return;
+            }
+
+            try {
+                const productsRef = collection(db, `artifacts/${appId}/users/${userId}/products`);
+                await addDoc(productsRef, {
+                    ...productData,
+                    createdAt: serverTimestamp()
+                });
+                console.log("Product saved to Firestore successfully.");
+                showMessage("Product saved to your collection!", 'success');
+            } catch (error) {
+                console.error("Error saving product to Firestore:", error);
+                showMessage("Failed to save product. Please try again.", 'error');
+            }
+        };
+
+        window.db = db;
+        window.userId = userId;
+
+        function showMessage(message, type) {
+            const messageBox = document.getElementById('message-box');
+            messageBox.textContent = message;
+            messageBox.className = `fixed top-8 right-8 max-w-sm p-4 rounded-lg text-white z-50 shadow-lg ${type}`;
+            messageBox.style.display = 'block';
+            messageBox.style.opacity = '1';
+
+            setTimeout(() => {
+                messageBox.style.opacity = '0';
+                setTimeout(() => {
+                    messageBox.style.display = 'none';
+                }, 500);
+            }, 3000);
+        }
+        window.showMessage = showMessage;
+    </script>
+</head>
+<body class="p-8">
+    <div id="message-box" style="display:none;"></div>
+    <div class="container mx-auto">
+        <!-- Header -->
+        <header class="text-center mb-12">
+            <h1 class="text-5xl font-extrabold text-primary mb-2">Kalai</h1>
+            <p class="text-xl font-medium text-accent">An AI-Powered Marketplace Assistant for Local Artisans</p>
+        </header>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Artisan Input Card -->
+            <div class="card p-8 col-span-1">
+                <h2 class="text-2xl font-bold mb-6 text-primary">Artisan's AI Toolkit</h2>
+                <div class="mb-4">
+                    <h3 class="text-lg font-semibold mb-2">User ID (for Firestore):</h3>
+                    <p id="user-id" class="p-2 bg-gray-100 rounded-md break-words text-sm"></p>
+                </div>
+                <form id="artisan-form" class="space-y-6">
+                    <div>
+                        <label for="product-name" class="block text-sm font-medium mb-1">Product Name</label>
+                        <input type="text" id="product-name" name="product-name" placeholder="E.g., Hand-painted Madhubani Plate" class="w-full p-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:border-secondary">
+                    </div>
+                    <div>
+                        <label for="product-description" class="block text-sm font-medium mb-1">Brief Description (or use your voice)</label>
+                        <textarea id="product-description" name="product-description" rows="4" placeholder="E.g., This traditional art piece depicts a peacock and is made with natural pigments. It's a symbol of love and prosperity in the Mithila region of Bihar." class="w-full p-3 rounded-lg border-2 border-gray-300 focus:outline-none focus:border-secondary"></textarea>
+                        
+                        <div class="flex items-center gap-2 mt-2">
+                            <label for="language-select" class="text-sm text-accent">Spoken Language:</label>
+                            <select id="language-select" class="text-sm p-1 rounded-md border-2 border-gray-300 focus:outline-none focus:border-secondary">
+                                <option value="en">English</option>
+                                <option value="as">Assamese</option>
+                                <option value="bn">Bengali</option>
+                                <option value="brx">Bodo</option>
+                                <option value="doi">Dogri</option>
+                                <option value="gu">Gujarati</option>
+                                <option value="hi">Hindi</option>
+                                <option value="kn">Kannada</option>
+                                <option value="ks">Kashmiri</option>
+                                <option value="kok">Konkani</option>
+                                <option value="mai">Maithili</option>
+                                <option value="ml">Malayalam</option>
+                                <option value="mni">Manipuri</option>
+                                <option value="mr">Marathi</option>
+                                <option value="ne">Nepali</option>
+                                <option value="or">Odia</option>
+                                <option value="pa">Punjabi</option>
+                                <option value="sa">Sanskrit</option>
+                                <option value="sat">Santali</option>
+                                <option value="sd">Sindhi</option>
+                                <option value="ta">Tamil</option>
+                                <option value="te">Telugu</option>
+                                <option value="ur">Urdu</option>
+                            </select>
+                            <button type="button" id="speech-to-text-btn" class="text-sm text-accent hover:text-primary transition-colors">
+                                <span class="flex items-center">
+                                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a4 4 0 110-8 4 4 0 010 8z"></path></svg>
+                                    Speak
+                                </span>
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label for="product-image" class="block text-sm font-medium mb-1">Upload Product Image</label>
+                        <div id="image-preview" class="flex items-center justify-center text-accent text-sm mb-2">
+                           <span id="image-placeholder">Click to upload an image</span>
+                        </div>
+                        <input type="file" id="product-image" name="product-image" accept="image/*" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-accent cursor-pointer">
+                    </div>
+                    <button type="submit" class="btn-primary w-full">Generate Content</button>
+                </form>
+                
+                <!-- Mock Location Button -->
+                <div class="mt-6 text-center">
+                    <button type="button" id="get-location-btn" class="text-sm text-accent hover:text-primary transition-colors">
+                        <span class="flex items-center justify-center">
+                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                            Get My Location
+                        </span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Output and Features Card -->
+            <div class="col-span-1 lg:col-span-2">
+                <!-- Loading Indicator -->
+                <div id="loading-indicator" class="flex justify-center items-center py-12">
+                    <div class="flex space-x-2">
+                        <div class="w-2 h-2 bg-primary rounded-full loading-dot"></div>
+                        <div class="w-2 h-2 bg-primary rounded-full loading-dot"></div>
+                        <div class="w-2 h-2 bg-primary rounded-full loading-dot"></div>
+                    </div>
+                </div>
+
+                <!-- Generated Output Card -->
+                <div id="output-card" class="card p-8 mb-8">
+                    <h2 class="text-2xl font-bold mb-6 text-primary">Generated Product Details</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Left: Image -->
+                        <div class="flex flex-col items-center space-y-4">
+                            <img id="generated-image" src="" alt="Generated product image" class="w-full h-auto rounded-xl shadow-lg border-2 border-gray-100">
+                            <div class="space-y-2">
+                                <h3 class="text-lg font-semibold">AI-Powered Visual Enhancement</h3>
+                                <p class="text-sm text-gray-600">The original image has been professionally staged and lit by our Imagen model to help it stand out, without altering the core design of your craft.</p>
+                            </div>
+                        </div>
+
+                        <!-- Right: Text Content -->
+                        <div class="space-y-6">
+                            <div>
+                                <div class="flex items-center justify-between mb-2">
+                                    <h3 class="text-lg font-semibold">Product Name</h3>
+                                    <span class="badge">AI-Generated</span>
+                                </div>
+                                <h4 id="generated-title" class="text-xl font-bold text-primary"></h4>
+                            </div>
+                            
+                            <div>
+                                <h3 class="text-lg font-semibold mb-2">Artisan Story</h3>
+                                <p id="generated-story" class="text-sm text-gray-600 leading-relaxed"></p>
+                            </div>
+                            
+                            <div>
+                                <h3 class="text-lg font-semibold mb-2">Marketing Copy</h3>
+                                <p id="generated-copy" class="text-sm text-gray-600 leading-relaxed"></p>
+                                <button onclick="copyToClipboard('generated-copy')" class="mt-2 text-sm text-secondary hover:text-primary transition-colors">
+                                    <span class="flex items-center">
+                                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                                        Copy to Clipboard
+                                    </span>
+                                </button>
+                            </div>
+
+                            <button id="save-product-btn" class="w-full btn-primary">Save Product</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ADK Agent & My Products Section -->
+                <div class="card p-8">
+                    <h2 class="text-2xl font-bold mb-6 text-primary">My Products</h2>
+                    <div id="artisan-products-list" class="space-y-4">
+                        <!-- Products will be dynamically loaded here from Firestore -->
+                        <p class="text-gray-500 text-center">Your products will appear here once you save them.</p>
+                    </div>
+
+                    <h2 class="text-2xl font-bold mt-8 mb-4 text-primary">ADK Agent Insights</h2>
+                    <div class="space-y-4 text-sm text-gray-700">
+                        <div class="flex items-start">
+                            <span class="text-secondary mr-2">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                            </span>
+                            <p>
+                                **Proactive Notification:** Our ADK agent has identified a potential customer in your area who has shown interest in similar art forms.
+                            </p>
+                        </div>
+                        <div class="flex items-start">
+                            <span class="text-secondary mr-2">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                            </span>
+                            <p>
+                                **Social Media Promotion:** The agent has automatically generated and posted a story on Instagram highlighting your new product, with a direct tag to your profile.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Helper function to convert a file to a Base64 string
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = error => reject(error);
+            });
+        }
+
+        // Helper function to copy text to clipboard
+        function copyToClipboard(elementId) {
+            const textToCopy = document.getElementById(elementId).innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = textToCopy;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+            console.log('Text copied to clipboard!');
+            // Add some user feedback
+            const copyBtn = document.querySelector(`#${elementId}`).nextElementSibling;
+            copyBtn.innerHTML = '<span class="flex items-center text-green-500"><svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>Copied!</span>';
+            setTimeout(() => {
+                copyBtn.innerHTML = '<span class="flex items-center"><svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>Copy to Clipboard</span>';
+            }, 2000);
+        }
+        window.copyToClipboard = copyToClipboard;
+
+        // Get DOM elements
+        const artisanForm = document.getElementById('artisan-form');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const outputCard = document.getElementById('output-card');
+        const generatedImage = document.getElementById('generated-image');
+        const generatedTitle = document.getElementById('generated-title');
+        const generatedStory = document.getElementById('generated-story');
+        const generatedCopy = document.getElementById('generated-copy');
+        const productNameInput = document.getElementById('product-name');
+        const productDescriptionTextarea = document.getElementById('product-description');
+        const productImageInput = document.getElementById('product-image');
+        const saveProductBtn = document.getElementById('save-product-btn');
+        const speechBtn = document.getElementById('speech-to-text-btn');
+        const languageSelect = document.getElementById('language-select');
+        const imagePreview = document.getElementById('image-preview');
+        const imagePlaceholder = document.getElementById('image-placeholder');
+
+        // Image preview functionality
+        imagePreview.onclick = () => productImageInput.click();
+        productImageInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imagePreview.style.backgroundImage = `url('${e.target.result}')`;
+                    imagePlaceholder.style.display = 'none';
+                };
+                reader.readAsDataURL(file);
+            } else {
+                imagePreview.style.backgroundImage = 'none';
+                imagePlaceholder.style.display = 'block';
+            }
+        });
+
+        // Form submission handler
+        artisanForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Show loading state
+            loadingIndicator.style.display = 'flex';
+            outputCard.style.display = 'none';
+
+            const productName = productNameInput.value;
+            const productDescription = productDescriptionTextarea.value;
+            const productImageFile = productImageInput.files[0];
+            let productImageBase64 = null;
+
+            if (productImageFile) {
+                try {
+                    productImageBase64 = await fileToBase64(productImageFile);
+                } catch (error) {
+                    showMessage('Error reading image file.', 'error');
+                    loadingIndicator.style.display = 'none';
+                    return;
+                }
+            } else {
+                showMessage('Please upload an image file.', 'error');
+                loadingIndicator.style.display = 'none';
+                return;
+            }
+
+            try {
+                // Step 1: Call Gemini for text generation
+                const geminiPrompt = `Act as an expert in Indian art and culture. You are given a product name and a brief description by an artisan. Your task is to generate three things: 
+                1. A compelling, SEO-optimized title for the product.
+                2. A rich, authentic story about the craft's history and cultural significance.
+                3. A short, engaging social media marketing post for the product.
+                
+                Product Name: ${productName}
+                Description: ${productDescription}
+                
+                Format your response as a JSON object with keys: "title", "story", "marketing_copy".`;
+
+                const geminiPayload = {
+                    contents: [{ parts: [{ text: geminiPrompt }] }],
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "OBJECT",
+                            properties: {
+                                "title": { "type": "STRING" },
+                                "story": { "type": "STRING" },
+                                "marketing_copy": { "type": "STRING" }
+                            },
+                            "propertyOrdering": ["title", "story", "marketing_copy"]
+                        }
+                    }
+                };
+                const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(geminiPayload)
+                });
+                const geminiResult = await geminiResponse.json();
+                const geminiText = geminiResult.candidates?.[0]?.content?.parts?.[0]?.text;
+                
+                if (!geminiText) {
+                    throw new Error("Failed to get a valid response from Gemini API.");
+                }
+
+                const geminiContent = JSON.parse(geminiText);
+
+                // Step 2: Call Imagen for image generation
+                const imagenPrompt = `An Indian artisan's hand-crafted product: "${productName}, ${productDescription}". Create a high-quality, professionally-lit product photo with a modern, clean background. DO NOT modify the original product's artistic elements. The image should feature the product prominently.`;
+                const imagenPayload = {
+                    instances: {
+                        prompt: imagenPrompt
+                    },
+                    parameters: {
+                        "sampleCount": 1
+                    }
+                };
+
+                const imagenResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(imagenPayload)
+                });
+                const imagenResult = await imagenResponse.json();
+                const base64Data = imagenResult.predictions?.[0]?.bytesBase64Encoded;
+                if (!base64Data) {
+                    throw new Error("Failed to get a valid image from Imagen API.");
+                }
+                const generatedImageUrl = `data:image/png;base64,${base64Data}`;
+
+                // Hide loading state and display output
+                loadingIndicator.style.display = 'none';
+                outputCard.style.display = 'block';
+
+                generatedTitle.textContent = geminiContent.title;
+                generatedStory.textContent = geminiContent.story;
+                generatedCopy.textContent = geminiContent.marketing_copy;
+                generatedImage.src = generatedImageUrl;
+                showMessage("Content and image generated successfully!", 'success');
+
+                saveProductBtn.onclick = () => {
+                    const productData = {
+                        title: geminiContent.title,
+                        story: geminiContent.story,
+                        marketing_copy: geminiContent.marketing_copy,
+                        imageUrl: generatedImageUrl,
+                        originalProductImage: productImageBase64 // Save original Base64 string for reference
+                    };
+                    window.saveProductToFirestore(productData);
+                };
+            } catch (error) {
+                console.error("An error occurred during content generation:", error);
+                loadingIndicator.style.display = 'none';
+                showMessage("An error occurred. Please check your inputs and try again.", 'error');
+            }
+        });
+
+        // Speech-to-Text and Translation Simulation
+        speechBtn.addEventListener('click', () => {
+            const selectedLanguage = languageSelect.value;
+            let spokenText;
+            
+            // NOTE: This is a simulation. A real implementation would use the Google Cloud Speech-to-Text API.
+            switch(selectedLanguage) {
+                case 'gu': // Gujarati
+                    spokenText = "આ સુંદર કાપડ ગુજરાતની પરંપરાગત તકનીકોનો ઉપયોગ કરીને હાથથી વણાયેલું છે. જટિલ પેટર્ન સ્થાનિક લોકકથાઓની વાર્તા કહે છે અને કુદરતી રંગોથી બનેલી છે. તે ઘરની સજાવટ માટે યોગ્ય છે.";
+                    break;
+                case 'mr': // Marathi
+                    spokenText = "हे सुंदर वस्त्र गुजरातमधील पारंपरिक तंत्र वापरून हाताने विणले आहे. गुंतागुंतीच्या नमुन्यांमध्ये स्थानिक लोककथांची कथा आहे आणि ते नैसर्गिक रंगांनी बनलेले आहे. हे घराच्या सजावटीसाठी योग्य आहे.";
+                    break;
+                case 'ta': // Tamil
+                    spokenText = "இந்த அழகான துணி குஜராத்தின் பாரம்பரிய நுட்பங்களைப் பயன்படுத்தி கையால் நெய்யப்பட்டுள்ளது. சிக்கலான வடிவங்கள் உள்ளூர் நாட்டுப்புறக் கதைகளின் கதையைச் சொல்கின்றன, மேலும் அவை இயற்கையான சாயங்களால் செய்யப்படுகின்றன. இது வீட்டு அலங்காரத்திற்கு ஏற்றது.";
+                    break;
+                case 'en': // English
+                default:
+                    spokenText = "This beautiful textile is handwoven using traditional techniques from Gujarat. The intricate patterns tell the story of local folklore and are made with natural dyes. It's perfect for home decor.";
+            }
+
+            // Simulate the entire process with user feedback
+            productDescriptionTextarea.placeholder = `Recording in ${languageSelect.options[languageSelect.selectedIndex].text}...`;
+            showMessage(`Recording in ${languageSelect.options[languageSelect.selectedIndex].text}...`, 'success');
+            
+            setTimeout(() => {
+                showMessage("Transcribing audio to text...", 'success');
+                // Simulate the transcribed text
+                productDescriptionTextarea.placeholder = spokenText;
+                
+                setTimeout(() => {
+                    showMessage("Translating to English...", 'success');
+                    // Simulate the translated English text
+                    const translatedText = "This beautiful textile is handwoven using traditional techniques from Gujarat. The intricate patterns tell the story of local folklore and are made with natural dyes. It's perfect for home decor.";
+                    productDescriptionTextarea.value = translatedText;
+                    showMessage("Translation complete!", 'success');
+                    console.log("Speech-to-Text and translation simulated. Text added to description field.");
+                }, 2000);
+            }, 2000);
+        });
+
+        // Location Button
+        const locationBtn = document.getElementById('get-location-btn');
+        locationBtn.addEventListener('click', () => {
+            // NOTE: This is a simulation. A real implementation would use the Google Location API.
+            console.log("Getting location simulated. ADK Agent would now use this information for targeted notifications.");
+            const locationLog = document.createElement('div');
+            locationLog.textContent = "Location simulated: A message has been sent to the ADK agent.";
+            locationLog.className = "text-sm text-gray-500 mt-2";
+            document.getElementById('get-location-btn').parentNode.appendChild(locationLog);
+        });
+
+    </script>
+</body>
+</html>
