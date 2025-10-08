@@ -20,7 +20,7 @@ Click the microphone icon to simulate multilingual voice input.
 
 Upload an image to test the image-handling functionality.
 
-⚠️ Note: For full functionality, a production version would need integration with Google Cloud APIs, including API keys, authentication, and a backend service (e.g., Cloud Run).
+
 
 ⌨️ Accessibility Tips
 Use Ctrl + Shift + M to toggle tab key behavior.
@@ -28,4 +28,4 @@ Use Ctrl + Shift + M to toggle tab key behavior.
 Alternatively, press Esc then Tab to move between interactive elements.
 
 
-Note: For live functionality, a real-world implementation would require connecting to the actual Google Cloud APIs and configuring API keys, authentication, and a back-end service on Cloud Run.
+
